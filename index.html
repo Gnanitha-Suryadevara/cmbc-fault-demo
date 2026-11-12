@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>CS 697 - GenAI Embedded Testing & Bug Injection</title>
+    <style>
+        :root {
+            --bg-color: #0f172a;
+            --card-bg: #1e293b;
+            --accent: #38bdf8;
+            --text: #f8fafc;
+            --danger: #ef4444;
+            --success: #22c55e;
+            --warn: #f59e0b;
+            --border: #334155;
+        }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-color);
+            color: var(--text);
+            margin: 0;
+            padding: 20px;
+        }
+        header {
+            margin-bottom: 24px;
+            border-bottom: 1px solid var(--border);
+            padding-bottom: 12px;
+        }
+        h1 { margin: 0 0 6px 0; font-size: 1.5rem; }
+        p { margin: 0; color: #94a3b8; font-size: 0.9rem; }
+        #backend-status { margin-top: 6px; font-size: 0.8rem; }
+
+        .container { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+        .panel {
+            background: var(--card-bg);
+            border: 1px solid var(--border);
+            border-radius: 8px;
+            padding: 16px;
+            display: flex;
+            flex-direction: column;
+            gap: 12px;
+        }
+        .panel h2 { font-size: 1.1rem; margin: 0; color: var(--accent); }
+
+        .dropzone {
+            border: 2px dashed var(--border);
+            border-radius: 6px;
+            padding: 16px;
+            text-align: center;
+            background: #090d16;
+            cursor: pointer;
+            transition: border-color 0.2s, background 0.2s;
+        }
+        .dropzone:hover, .dropzone.dragover { border-color: var(--accent); background: #111827; }
+        .dropzone-icon { font-size: 1.5rem; color: var(--accent); margin-bottom: 4px; }
+        .dropzone-text { font-size: 0.85rem; color: #94a3b8; }
+        .dropzone-text span { color: var(--accent); text-decoration: underline; }
+        #file-input { display: none; }
+        .file-info { font-size: 0.8rem; color: var(--success); margin-top: 4px; font-weight: bold; }
+
+        textarea {
+            width: 100%;
+            height: 240px;
+            background: #090d16;
+            color: #38bdf8;
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            padding: 12px;
+            font-family: "Fira Code", monospace;
+            font-size: 0.85rem;
+            box-sizing: border-box;
+            resize: vertical;
+        }
+
+        .controls { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+        .controls label { font-size: 0.85rem; color: #94a3b8; }
+        select, button, input[type="text"], input[type="number"] {
+            background: #334155;
+            color: var(--text);
+            border: 1px solid var(--border);
+            padding: 8px 14px;
+            border-radius: 6px;
+            font-size: 0.9rem;
+        }
+        select, button { cursor: pointer; }
+        input[type="text"] { width: 140px; }
+        input[type="number"] { width: 70px; }
+        button.primary { background: var(--accent); color: #0f172a; font-weight: bold; border: none; }
+        button.primary:hover { opacity: 0.9; }
+        button:disabled { opacity: 0.5; cursor: wait; }
+
+        .console {
+            background: #050811;
+            color: #a7f3d0;
+            font-family: "Fira Code", monospace;
+            padding: 12px;
+            border-radius: 6px;
+            height: 420px;
+            overflow-y: auto;
+            font-size: 0.82rem;
+            white-space: pre-wrap;
+            border: 1px solid var(--border);
+        }
+
+        .badge { display: inline-block; padding: 4px 8px; border-radius: 4px; font-size: 0.8rem; font-weight: bold; }
+        .badge-fail { background: rgba(239, 68, 68, 0.2); color: var(--danger); border: 1px solid var(--danger); }
+        .badge-pass { background: rgba(34, 197, 94, 0.2); color: var(--success); border: 1px solid var(--success); }
+        .badge-warn { background: rgba(245, 158, 11, 0.2); color: var(--warn); border: 1px solid var(--warn); }
+        .badge-run  { background: rgba(56, 189, 248, 0.2); color: var(--accent); border: 1px solid var(--accent); }
+        #summary { font-size: 0.85rem; color: #cbd5e1; line-height: 1.5; }
+    </style>
+</head>
+<body>
+
+    <header>
+        <h1>GenAI for Embedded Testing (CS 697)</h1>
+        <p>Targeting ISORC 2027 • Automated Fault Injection & CBMC Verification Pipeline</p>
+        <div id="backend-status">Checking backend...</div>
+        <div id="limits-note" style="margin-top:4px;font-size:0.78rem;color:#64748b;">Shared demo limits: code up to 20 KB, standard headers only (stdlib.h, stdint.h, string.h, ...), unwind up to 20, 20 s per CBMC run.</div>
+    </header>
+
+    <div class="container">
+        <!-- Left: target code and settings -->
+        <div class="panel">
+            <h2>1. User Target C Code & Fault Injector</h2>
+
+            <div class="dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+                <div class="dropzone-icon">📁</div>
+                <div class="dropzone-text">
+                    Drag & drop your embedded <code>.c</code> file here or <span>browse</span>
+                </div>
+                <div id="file-info" class="file-info"></div>
+                <input type="file" id="file-input" accept=".c,.h,.cpp,.txt" onchange="handleFileSelect(event)">
+            </div>
+
+            <textarea id="c-code" placeholder="Or paste/edit target C function here...">#include <stdlib.h>
+
+void process_sensor_data(int count) {
+    __CPROVER_assume(count >= 0 && count <= 8);
+    int *sensors = (int *)malloc(count * sizeof(int));
+    if (!sensors) return;
+
+    for (int i = 0; i < count; i++) {
+        sensors[i] = i * 10;
+    }
+
+    free(sensors);
+}</textarea>
+
+            <div class="controls">
+                <label for="fault-type">Fault:</label>
+                <select id="fault-type">
+                    <option value="overflow">Buffer Overflow (loop off-by-one)</option>
+                    <option value="leak">Memory Leak (missing free)</option>
+                    <option value="nondet">Uninitialized Local (limited)</option>
+                </select>
+                <label for="fn-name">Function:</label>
+                <input type="text" id="fn-name" placeholder="auto-detect">
+                <label for="unwind">Unwind:</label>
+                <input type="number" id="unwind" value="10" min="1" max="20">
+            </div>
+            <div class="controls">
+                <button class="primary" id="run-btn" onclick="generateHarness()">Inject & Verify</button>
+                <label><input type="checkbox" id="inject-toggle" checked> Inject fault (uncheck to verify code as-is)</label>
+            </div>
+        </div>
+
+        <!-- Right: results -->
+        <div class="panel">
+            <h2>2. CBMC Verification Output</h2>
+            <div>
+                Status: <span id="status-badge" class="badge badge-pass">READY</span>
+            </div>
+            <div id="summary"></div>
+            <div class="console" id="console-log">Ready to process target C code.
+Upload a .c file or paste code, select a fault, and click 'Inject & Verify'.</div>
+        </div>
+    </div>
+
+    <script>
+        // Same origin when served by the backend; fall back to localhost when opened from a file.
+        const API = location.protocol === "file:" ? "http://127.0.0.1:8000" : "";
+
+        // Maps backend status -> [badge label, badge class]
+        const STATUS_VIEW = {
+            FAULT_DETECTED:        ["FAULT DETECTED",            "badge-pass"],
+            FAULT_MISSED:          ["FAULT MISSED",              "badge-fail"],
+            VERIFIED:              ["VERIFIED",                  "badge-pass"],
+            BUG_FOUND:             ["BUG FOUND",                 "badge-fail"],
+            INCOMPLETE:            ["INCOMPLETE (UNWIND BOUND)", "badge-warn"],
+            NO_MUTATION_SITE:      ["NO MUTATION SITE",          "badge-warn"],
+            TIMEOUT:               ["TIMEOUT",                   "badge-warn"],
+            PARSE_ERROR:           ["PARSE ERROR",               "badge-fail"],
+            TOOL_ERROR:            ["TOOL ERROR",                "badge-fail"],
+            BASELINE_BUG_FOUND:    ["BASELINE ALREADY BUGGY",    "badge-warn"],
+            BASELINE_PARSE_ERROR:  ["BASELINE PARSE ERROR",      "badge-fail"],
+            BASELINE_TIMEOUT:      ["BASELINE TIMEOUT",          "badge-warn"],
+            BASELINE_TOOL_ERROR:   ["BASELINE TOOL ERROR",       "badge-fail"]
+        };
+
+        const badge = document.getElementById("status-badge");
+        const consoleLog = document.getElementById("console-log");
+        const summary = document.getElementById("summary");
+        const runBtn = document.getElementById("run-btn");
+
+        function setBadge(label, cls) {
+            badge.className = "badge " + cls;
+            badge.textContent = label;
+        }
+
+        // --- Backend health indicator ---
+        async function checkBackend() {
+            const el = document.getElementById("backend-status");
+            try {
+                const r = await fetch(API + "/health");
+                const d = await r.json();
+                el.textContent = d.cbmc_found ? "Backend connected, " + (d.cbmc_version || "CBMC found") : "Backend connected, but CBMC not found on PATH";
+                el.style.color = d.cbmc_found ? "#22c55e" : "#f59e0b";
+            } catch (e) {
+                el.textContent = "Backend not reachable at " + API + " (start it with uvicorn)";
+                el.style.color = "#ef4444";
+            }
+        }
+        checkBackend();
+
+        // --- File upload & drag/drop ---
+        const dropzone = document.getElementById("dropzone");
+        dropzone.addEventListener("dragover", (e) => { e.preventDefault(); dropzone.classList.add("dragover"); });
+        dropzone.addEventListener("dragleave", () => dropzone.classList.remove("dragover"));
+        dropzone.addEventListener("drop", (e) => {
+            e.preventDefault();
+            dropzone.classList.remove("dragover");
+            if (e.dataTransfer.files.length > 0) readFile(e.dataTransfer.files[0]);
+        });
+
+        function handleFileSelect(event) {
+            if (event.target.files.length > 0) readFile(event.target.files[0]);
+        }
+
+        function readFile(file) {
+            const reader = new FileReader();
+            reader.onload = function (e) {
+                document.getElementById("c-code").value = e.target.result;
+                document.getElementById("file-info").textContent = "Loaded: " + file.name + " (" + file.size + " bytes)";
+            };
+            reader.readAsText(file);
+        }
+
+        // --- Verification call ---
+        async function generateHarness() {
+            const fault = document.getElementById("fault-type").value;
+            const fn = document.getElementById("fn-name").value.trim();
+            const payload = {
+                code: document.getElementById("c-code").value,
+                fault_type: fault,
+                function: fn === "" ? null : fn,
+                unwind: parseInt(document.getElementById("unwind").value, 10) || 10,
+                inject: document.getElementById("inject-toggle").checked
+            };
+
+            setBadge("RUNNING...", "badge-run");
+            runBtn.disabled = true;
+            summary.textContent = "";
+            consoleLog.textContent = "[INFO] Sending code to backend...\n[INFO] Fault: " + fault.toUpperCase() +
+                "  |  unwind: " + payload.unwind + "\n[INFO] Running CBMC on baseline, then on the mutant...\n";
+
+            try {
+                const response = await fetch(API + "/verify", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+
+                if (!response.ok) {
+                    let msg = data.detail || response.statusText;
+                    if (Array.isArray(msg)) msg = msg.map(m => m.msg + (m.loc ? " (" + m.loc.slice(1).join(".") + ")" : "")).join("; ");
+                    throw new Error(msg);
+                }
+
+                const view = STATUS_VIEW[data.status] || [data.status, "badge-warn"];
+                setBadge(view[0], view[1]);
+
+                // Short human-readable summary
+                const lines = [];
+                lines.push("Function: " + (data.function || "(none detected)"));
+                if (data.baseline) lines.push("Baseline: " + data.baseline.status);
+                if (data.mutation) lines.push("Mutation: " + data.mutation);
+                if (data.mutant) lines.push("Mutant: " + data.mutant.status);
+                if (data.new_failures && data.new_failures.length > 0) {
+                    lines.push("New failed checks: " + data.new_failures.join(", "));
+                }
+                summary.textContent = lines.join("\n");
+                summary.style.whiteSpace = "pre-line";
+
+                // Console: mutated code first, then raw CBMC output
+                let out = "";
+                if (data.mutated_code) {
+                    out += "--- MUTATED CODE ---\n" + data.mutated_code + "\n\n";
+                }
+                if (data.status === "FAULT_DETECTED") {
+                    out += "NOTE: the raw CBMC output below is for the MUTATED code.\n" +
+                           "'VERIFICATION FAILED' there means CBMC found the injected bug (expected).\n\n";
+                }
+                out += data.output;
+                consoleLog.textContent += "\n" + out;
+            } catch (error) {
+                setBadge("CONNECTION ERROR", "badge-fail");
+                consoleLog.textContent += "\n[ERROR] " + error.message +
+                    "\nIf this keeps happening, the backend may be starting up or unreachable. Try again in a minute.";
+            } finally {
+                runBtn.disabled = false;
+            }
+        }
+    </script>
+</body>
+</html>
